@@ -1,0 +1,17 @@
+# Security: Ignore environment variables and keys
+.env
+*.key
+*.pem
+
+# Python: Ignore compiled bytecode and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# OS: Ignore system files
+.DS_Store
+
+# Virtual Environment (common names)
+venv/
+env/
+.venv/
