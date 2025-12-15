@@ -1,122 +1,74 @@
-# Kalshi Discord Bot 📈
+# Discord Kalshi Bot 🤖
 
-A powerful, open-source Discord bot that integrates with the [Kalshi Prediction Market](https://kalshi.com/) API (v2). 
+A powerful, AI-driven Discord bot for browsing live Kalshi prediction markets. Features smart categorization, typo tolerance, and real-time filtering.
 
-**Features:**
-- **!balance**: Check your current Kalshi cash balance.
-- **!positions**: View your active bets and average entry price.
-- **!search <query>**: Find markets and see live Yes/No prices.
-- **Real-time Alerts**: Automatically posts to a Discord channel when an order is filled.
-*   🔒 **Secure:** Uses RSA-SHA256 signing for all requests; keys stay local.
+## ✨ Key Features
 
----
+*   **Smart Search**: `!search nfl` finds games. `!search politics` finds election markets.
+*   **Interactive Menu**: `!search sports` opens a clickable menu to browse NFL, NBA, NHL, and more.
+*   **Typo Tolerance**: Type `!search footbll` or `!search nhhl` and the bot will figure it out!
+*   **Live Game Filters**: 
+    *   Shows strictly **imminent games** (Tonight/Tomorrow) to reduce clutter.
+    *   Sorts by kickoff time.
+*   **Futures Support**: `!search nfl futures` bypasses time filters to show Season Winners and Super Bowl odds.
+*   **Account Tools**: Check your `!balance` and active `!positions`.
+*   **AI Powered**: Uses Gemini to categorize generic queries (e.g., "funny bets").
 
-## ⚠️ Disclaimer
-This software is for educational purposes only. It is not financial advice. Use it at your own risk. The authors are not responsible for any financial losses incurred while using this bot.
+## 🚀 Setup
 
----
-
-## Prerequisites
-*   **Python 3.9** or higher.
-*   A **Kalshi** account.
-*   A **Discord** account.
-
----
-
-### 🧠 AI Upgrade (Optional)
-To enable **Smart Semantic Search**, this bot integrates with **Google Gemini**.
-
-### How to Enable:
-1.  **Get a Free API Key:**
-    *   Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
-    *   Click **"Create API Key"**.
-2.  **Add to `.env`:**
-    *   Open your `.env` file and add: `GEMINI_API_KEY=your_key_here`
-3.  **Restart Bot:**
-    *   The bot will detect the key and automatically upgrading `!search` commands.
-
-> **Note:** The free tier is rate-limited to **15 requests/minute**. The bot includes a built-in counter and will automatically fallback to standard search if you exceed this limit.
-
-## 🛠️ Step-by-Step Setup Guide
-
-### Phase 1: Get Your Credentials
-
-#### 1. 🤖 Create the Discord Bot
-1.  Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-2.  Click **"New Application"** -> Name it (e.g., "KalshiBot").
-3.  Go to the **"Bot"** tab in the left sidebar.
-4.  Click **"Reset Token"** -> **Copy** this token. This is your `DISCORD_TOKEN`.
-5.  **Critical:** Scroll down to "Privileged Gateway Intents" and enable **"Message Content Intent"**.
-6.  Go to **OAuth2** -> **URL Generator**.
-    *   Select Scope: `bot`.
-    *   Select Permissions: `Send Messages`, `Embed Links`, `Read Message History` (or just `Administrator` for testing).
-    *   Copy the URL and open it in your browser to invite the bot to your server.
-
-#### 2. 🆔 Get Discord Channel ID
-1.  Open Discord -> User Settings (Gear ⚙️) -> **Advanced**.
-2.  Enable **"Developer Mode"**.
-3.  Right-click the channel where you want alerts.
-4.  Click **"Copy Channel ID"**. This is your `DISCORD_CHANNEL_ID`.
-
-#### 3. 🔑 Get Kalshi API Keys
-1.  Log in to [Kalshi.com](https://kalshi.com/).
-2.  Go to **Account** -> **Settings** -> **API**.
-3.  Create a new API Key.
-4.  **Download the `.pem` file.** Save this safely! This is your `KALSHI_PRIVATE_KEY_PATH`.
-5.  Copy the **Key ID** (UUID). This is your `KALSHI_KEY_ID`.
-
----
-
-## 🚀 Installation
-
-1.  **Clone the repository:**
-    ```bash
-    git clone https://github.com/YOUR_USERNAME/discord-kalshi.git
-    cd discord-kalshi
-    ```
-
-2.  **Install Dependencies:**
+1.  **Install Dependencies**:
     ```bash
     pip install -r requirements.txt
     ```
-
-3.  **Secure Configuration:**
-    *   Create a file named `.env` in the project folder.
-    *   Copy the following text into it and fill in your keys:
-
-    ```ini
-    # .env file
-    DISCORD_TOKEN=paste_your_discord_token_here
-    DISCORD_CHANNEL_ID=paste_channel_id_here
-    KALSHI_KEY_ID=paste_kalshi_key_id_here
-    KALSHI_PRIVATE_KEY_PATH=kalshi.key  # The filename of your .pem file
+2.  **Environment Variables**:
+    Create a `.env` file with your credentials or use the `.env.example` as a template:
+    ```env
+    DISCORD_TOKEN=your_token
+    DISCORD_CHANNEL_ID=your_channel_id
+    KALSHI_KEY_ID=your_key_id
+    KALSHI_PRIVATE_KEY_PATH=/path/to/key.pem
+    GEMINI_API_KEY=your_gemini_key
     ```
+    
+    ### 🔑 Obtaining Credentials
+    
+    **1. Discord Token:**
+    *   Go to the [Discord Developer Portal](https://discord.com/developers/applications).
+    *   Create a "New Application" -> "Bot".
+    *   Enable "Message Content Intent" (Critical!).
+    *   Click "Reset Token" to get your `DISCORD_TOKEN`.
+    *   Invite the bot to your server using the "OAuth2" -> "URL Generator" (scopes: `bot`, permissions: `Read Messages/View Channels`, `Send Messages`).
 
-    *   **Move** your downloaded `.pem` key file into this folder.
+    **2. Kalshi Keys:**
+    *   Log in to [Kalshi](https://kalshi.com/).
+    *   Go to **Account** -> **API Management**.
+    *   Create a NEW Key. It will give you a **Key ID** (`KALSHI_KEY_ID`) and prompt you to download a `.pem` file.
+    *   Save this `.pem` file to your project folder (e.g., `kalshi-key.pem`).
+    *   Set `KALSHI_PRIVATE_KEY_PATH` to the full path of this `.pem` file.
 
----
-
-## ▶️ Usage
-
-1.  **Start the bot:**
+    **3. Gemini API Key (for AI):**
+    *   Visit [Google AI Studio](https://aistudio.google.com/app/apikey).
+    *   Click "Get API Key" -> "Create API Key".
+    *   Copy string to `GEMINI_API_KEY`.
+3.  **Run the Bot**:
     ```bash
-    python bot.py
+    python3 bot.py
     ```
-    *You should see: "Logged in as KalshiBot#1234"*
 
-2.  **Commands:**
-    *   `!balance` - Shows your current available cash.
-    *   `!positions` - Shows your active bets/positions.
-    *   `!search <query>` - Searches for markets (e.g., `!search fed`).
+## 📜 Commands
 
-3.  **Auto-Alerts:**
-    *   The bot will now silently listen in the background. As soon as one of your orders fills on Kalshi, it will post an Embed to your chosen channel.
+| Command | Description |
+| :--- | :--- |
+| `!search <query>` | Search for markets/events. |
+| `!search sports` | Open the interactive Sports Menu. |
+| `!balance` | View your cash balance. |
+| `!positions` | View active trades. |
+| `!commands` | Show help menu. |
+
+## 🛠 Troubleshooting
+
+*   **"No relevant series found"**: Try a broader term or check your spelling (though the bot handles most typos!).
+*   **Rate Limits**: The AI has a usage limit (15/min). Menus do not consume AI quota.
 
 ---
-
-## 🛡️ Security Note
-*   **NEVER** share your `.env` file or your `.pem` key file.
-*   This project includes a `.gitignore` file that prevents these sensitive files from being uploaded to GitHub.
-
-## 📄 License
-MIT License. Feel free to modify and use!
+*Built with Discord.py & Kalshi v2 API*

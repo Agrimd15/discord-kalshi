@@ -1,7 +1,7 @@
 
 import os
 import discord
-from discord.ext import commands, tasks
+from discord.ext import commands
 import aiohttp
 import websockets
 import json
@@ -18,7 +18,6 @@ load_dotenv()
 
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
-KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
 KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -40,6 +39,9 @@ BASE_URL = "https://api.elections.kalshi.com"
 # WebSocket URL (For real-time streaming alerts)
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 
+# Global Hierarchy Cache (Dynamic)
+hierarchy_cache = {}
+
 # Bot Setup
 # We enable 'message_content' so the bot can read commands like "!balance"
 intents = discord.Intents.default()
@@ -49,8 +51,9 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 @bot.event
 async def on_ready():
     print(f"Logged in as {bot.user}")
+    # await refresh_hierarchy() # Disabled for stability
     # Start the WebSocket background task
-    bot.loop.create_task(order_fill_listener())
+    # bot.loop.create_task(order_fill_listener())
 
 async def fetch_data(path, method="GET"):
     """Generic helper to fetch data from Kalshi API with signing."""
@@ -67,6 +70,41 @@ async def fetch_data(path, method="GET"):
             else:
                 error_text = await response.text()
                 return None, f"Status: {response.status}\nError: {error_text}"
+
+async def refresh_hierarchy():
+    """
+    Fetches all series from Kalshi, organizes them by Category -> Tag,
+    and builds the global hierarchy_cache. This enables fast, dynamic menu browsing.
+    """
+    global hierarchy_cache
+    print("Building dynamic hierarchy from Kalshi API...")
+    data, error = await fetch_data("/trade-api/v2/series")
+    if error:
+         print(f"Hierarchy Error: {error}")
+         return
+
+    tree = {}
+    for s in data.get("series", []):
+         category = s.get("category", "Uncategorized")
+         tags = s.get("tags") or ["General"]
+         tag = tags[0] if tags else "General"
+         
+         if category not in tree: tree[category] = {}
+         if tag not in tree[category]: tree[category][tag] = {}
+         
+         # Use Title as Label (Truncated for Discord Buttons)
+         label = s.get("title", s["ticker"])[:79]
+         ticker = s.get("ticker", "")
+         
+         tree[category][tag][label] = ticker
+         
+         # Auto-add Futures view for Games (Dynamic #ALL logic)
+         if "game" in s.get("title", "").lower() or "game" in ticker.lower():
+              f_label = f"{label} (All/Futures)"[:79]
+              tree[category][tag][f_label] = ticker + "#ALL"
+              
+    hierarchy_cache = tree
+    print(f"Hierarchy built with {len(tree)} categories.")
 
 @bot.command(aliases=['bal'])
 async def balance(ctx):
@@ -140,131 +178,290 @@ async def positions(ctx):
     await ctx.send(embed=embed)
 
 @bot.command()
-async def search(ctx, *, query):
+async def commands(ctx):
     """
-    Search for active markets utilizing AI for semantic relevance if available.
-    Endpoint: GET /trade-api/v2/markets
+    Lists all available commands.
     """
-    global ai_request_count, ai_window_start
-
-    # Fetch more results to give the AI a good pool to choose from
-    # Kalshi's default search is fuzzy and often returns irrelevant top results.
-    # We increase the limit to 100 to catch relevant markets that might be buried.
-    path = f"/trade-api/v2/markets?query={query}&limit=100&status=open"
-    data, error = await fetch_data(path)
+    embed = discord.Embed(
+        title="🤖 KalshiBot Commands",
+        description="Here are the commands you can use:",
+        color=discord.Color.blue()
+    )
     
+    # 1. Search (Core)
+    embed.add_field(
+        name="🔍 Market Search",
+        value="`!search <query>`: Smart search (e.g. `!search nfl`, `!search politics`)\n`!search sports`: Open the Browse Menu",
+        inline=False
+    )
+    
+    # 2. Portfolio / Account
+    embed.add_field(
+        name="💰 Account & Trading",
+        value="`!balance` (or `!bal`): Check your cash balance.\n`!positions` (or `!pos`): View active positions.",
+        inline=False
+    )
+    
+    # 3. Meta
+    embed.add_field(
+        name="ℹ️ Other",
+        value="`!commands`: Shows this help message.",
+        inline=False
+    )
+    
+    embed.set_footer(text="Tip: Start with !search sports to explore categories!")
+    await ctx.send(embed=embed)
+
+# --- Recursive Hierarchy View ---
+
+class HierarchyView(discord.ui.View):
+    def __init__(self, ctx, hierarchy_data, path_label="Menu"):
+        super().__init__(timeout=60)
+        self.ctx = ctx
+        self.hierarchy_data = hierarchy_data
+        self.path_label = path_label
+        
+        # Determine if current level is Keys (Sub-menus) or Strings (Tickers)
+        # If dict, show keys as buttons to drill down.
+        # If string, we shouldn't be here (leaf node).
+        
+        for key, value in hierarchy_data.items():
+            if isinstance(value, dict):
+                # Sub-menu button
+                self.add_item(HierarchyButton(label=key, value=value, is_leaf=False, ctx=ctx, parent_view=self))
+            else:
+                # Leaf button (Ticker)
+                self.add_item(HierarchyButton(label=key, value=value, is_leaf=True, ctx=ctx, parent_view=self))
+
+class HierarchyButton(discord.ui.Button):
+    def __init__(self, label, value, is_leaf, ctx, parent_view):
+        style = discord.ButtonStyle.green if is_leaf else discord.ButtonStyle.secondary
+        super().__init__(label=label, style=style)
+        self.target_value = value
+        self.is_leaf = is_leaf
+        self.ctx = ctx
+        self.parent_view = parent_view
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user != self.ctx.author:
+            await interaction.response.send_message("This menu is not for you.", ephemeral=True)
+            return
+
+        if self.is_leaf:
+            # IT'S A TICKER! Search it.
+            await interaction.response.defer()
+            await interaction.message.edit(content=f"🔎 Loading Markets for **{self.label}** ({self.target_value})...", view=None)
+            await fetch_and_display_markets(self.ctx, self.target_value, f"Menu Selection: {self.label}", interaction.message)
+        else:
+            # IT'S A SUB-MENU! Drill down.
+            await interaction.response.defer()
+            new_view = HierarchyView(self.ctx, self.target_value, path_label=f"{self.parent_view.path_label} > {self.label}")
+            await interaction.message.edit(content=f"📂 **{self.parent_view.path_label} > {self.label}**", view=new_view)
+
+# --- Helper to Load Hierarchy ---
+def load_hierarchy(query):
+    import difflib
+    
+    # Use Dynamic Cache
+    data = hierarchy_cache
+    if not data:
+        return None
+        
+    query_str = query.lower()
+
+    # 1. Exact/Fuzzy Keys (Menu Traversal)
+    # Check Categories
+    cats = list(data.keys())
+    # Exact
+    if query_str in [c.lower() for c in cats]:
+        for c in cats:
+            if c.lower() == query_str: return data[c]
+    # Fuzzy
+    match_cat = difflib.get_close_matches(query_str, cats, n=1, cutoff=0.6)
+    if match_cat: return data[match_cat[0]]
+
+    # Check Tags (Sub-level)
+    for cat in data:
+        tags = list(data[cat].keys())
+        if query_str in [t.lower() for t in tags]:
+             for t in tags:
+                 if t.lower() == query_str: return data[cat][t]
+        
+        match_tag = difflib.get_close_matches(query_str, tags, n=1, cutoff=0.6)
+        if match_tag: return data[cat][match_tag[0]]
+
+    # 2. Leaf Search (Smart Ticker/Title Match) - "The Fix"
+    # Search all items to find best match across entire API
+    
+    potential_matches = []
+    
+    for cat in data:
+        for tag in data[cat]:
+            for label, ticker in data[cat][tag].items():
+                # Score Candidate
+                score = 0
+                
+                t_raw = ticker.lower()
+                t_clean = t_raw.replace("kx", "").replace("#all", "")
+                l_clean = label.lower()
+                
+                # A. Exact Substring in Ticker (Strongest)
+                # "nfl" in "nflgame"
+                if query_str in t_clean:
+                    score = 1.0
+                
+                # B. Exact Substring in Title
+                elif query_str in l_clean:
+                    score = 0.9
+                
+                # C. Fuzzy Matches
+                else:
+                    # Ticker fuzzy (Good for "nfll" -> "nflgame")
+                    r_tick = difflib.SequenceMatcher(None, query_str, t_clean).ratio()
+                    # Title fuzzy
+                    r_title = difflib.SequenceMatcher(None, query_str, l_clean).ratio()
+                    
+                    score = max(r_tick, r_title)
+                
+                # Filter weak matches
+                if score > 0.5:
+                    potential_matches.append((score, ticker))
+
+    if potential_matches:
+        # Sort by Score Descending -> Pick Best
+        potential_matches.sort(key=lambda x: x[0], reverse=True)
+        return potential_matches[0][1] # Return Ticker String
+
+    return None
+
+# --- Helper to Display Markets (Used by both auto-select and button click) ---
+async def fetch_and_display_markets(ctx, series_ticker, query, message_to_edit=None):
+    import datetime
+    import re
+    
+    # Check for #ALL flag (Exempt from filters)
+    force_all = False
+    if series_ticker.endswith("#ALL"):
+        series_ticker = series_ticker.replace("#ALL", "")
+        force_all = True
+
+    path = f"/trade-api/v2/markets?series_ticker={series_ticker}&status=open"
+    
+    data, error = await fetch_data(path)
     if error:
-        await ctx.send(f"Search failed. {error}")
+        msg = f"❌ Error fetching markets: {error}"
+        if message_to_edit: await message_to_edit.edit(content=msg)
+        else: await ctx.send(msg)
         return
 
     markets = data.get("markets", [])
     if not markets:
-        await ctx.send(f"No active markets found for '{query}'.")
-        return
+         msg = f"❌ No open markets found in series `{series_ticker}`."
+         if message_to_edit: await message_to_edit.edit(content=msg)
+         else: await ctx.send(msg)
+         return
 
-    # AI Reranking Logic
-    final_markets = []
-    headers_text = ""
+    # --- Robust Filtering Logic ---
+    live_markets = []
+    now_utc = datetime.datetime.utcnow().replace(tzinfo=None)
+    cutoff_time = now_utc + datetime.timedelta(hours=36) # Broad window for "Imminent"
     
-    # Check if Gemini is configured and we are within rate limits
-    current_time = time.time()
-    if current_time - ai_window_start > 60:
-        # Reset window
-        ai_request_count = 0
-        ai_window_start = current_time
-
-    use_ai = False
-    if GEMINI_API_KEY and ai_request_count < AI_REQUEST_LIMIT:
-        use_ai = True
-        ai_request_count += 1
-        
-        # Prepare data for AI
-        # We send Ticker + Title + Event Ticker to give AI maximum context
-        market_list_str = "\n".join([f"{m['ticker']}: {m['title']}" for m in markets])
-        prompt = f"""
-        You are a financial assistant. 
-        Select the top 5 most relevant markets for the query '{query}' from the list below.
-        If NO markets are relevant to '{query}', return NOTHING (empty string).
-        Return ONLY the tickers, separated by commas. Nothing else.
-        
-        List:
-        {market_list_str}
-        """
-        
-        try:
-            model = genai.GenerativeModel('gemini-flash-latest')
-            response = model.generate_content(prompt)
-            
-            # Parse response (Comm separated tickers)
-            text = response.text.strip()
-            if not text:
-                final_markets = [] # Explicitly empty if AI said so
-            else:
-                relevant_tickers = [t.strip() for t in text.split(',')]
-                
-                # Filter markets based on AI selection, preserving order of relevance
-                market_map = {m['ticker']: m for m in markets}
-                for t in relevant_tickers:
-                    if t in market_map:
-                        final_markets.append(market_map[t])
-            
-            # Fallback logic
-            if not final_markets:
-                # If AI returned nothing, it means nothing was relevant.
-                # Don't show garbage. Show message.
-                headers_text = f"⚠️ Gemini AI found no relevant markets for sure."
-                # We leave final_markets empty so loop below does nothing, 
-                # but we need to handle the 'empty embed' case.
-            else:
-                headers_text = f"✨ Results curated by Gemini AI (Usage: {ai_request_count}/{AI_REQUEST_LIMIT})"
-            
-        except Exception as e:
-            print(f"AI Error: {e}")
-            # If AI errors, we unfortunately have to fallback to top 5 garbage or show error?
-            # Fallback is safer for reliability, but might show junk.
-            final_markets = markets[:5]
-            headers_text = "⚠️ AI failed, showing top standard results."
+    seen_events = set()
     
-    else:
-        # Fallback to standard top 5
-        final_markets = markets[:5]
-        if GEMINI_API_KEY:
-             headers_text = f"⚠️ Rate limit reached ({ai_request_count}/{AI_REQUEST_LIMIT}), showing top standard results."
+    def parse_ticker_date(ticker):
+        match = re.search(r"-(\d{2})([A-Z]{3})(\d{2})", ticker)
+        if match:
+            yy, m_str, dd = match.groups()
+            year = 2000 + int(yy)
+            day = int(dd)
+            months = {"JAN":1, "FEB":2, "MAR":3, "APR":4, "MAY":5, "JUN":6, 
+                      "JUL":7, "AUG":8, "SEP":9, "OCT":10, "NOV":11, "DEC":12}
+            month = months.get(m_str, 0)
+            if month:
+                try: return datetime.datetime(year, month, day)
+                except: return None
+        return None
 
-    embed = discord.Embed(
-        title=f"🔎 Search Results: '{query}'", 
-        description=headers_text,
-        color=discord.Color.gold()
-    )
+    # Determine if this is a "Game" series that should be filtered by date
+    # HEURISTIC: Filter filter ONLY IF:
+    # 1. "GAME" in ticker
+    # 2. NOT force_all (Futures)
+    is_time_sensitive_series = "GAME" in series_ticker.upper() and not force_all
 
-    if not final_markets:
-        embed.description += "\nNo relevant markets found."
-
-    for m in final_markets:
-        try:
-            # UI Fix: Ticker is internal ID. Title is the human readable connection.
-            # Event Ticker is the group.
-            # User wants: Title as main Header. Event ID below.
-            
-            ticker = m.get("ticker")
-            event_ticker = m.get("event_ticker", "N/A")
-            title = m.get("title")
-            yes_price = m.get("yes_bid")
-            no_price = m.get("no_bid")
-
-            y_txt = f"{yes_price}¢" if yes_price else "N/A"
-            n_txt = f"{no_price}¢" if no_price else "N/A"
-
-            embed.add_field(
-                name=title, # Set Title as the Field Name (Bold top text)
-                value=f"Event ID: `{event_ticker}`\n🟢 Yes: `{y_txt}` | 🔴 No: `{n_txt}`",
-                inline=False
-            )
-        except Exception as e:
-            print(f"Error processing a market result: {e}")
+    for m in markets:
+        event_id = m.get("event_ticker", "")
+        if event_id in seen_events:
             continue
+            
+        market_date = parse_ticker_date(event_id)
+        
+        should_show = True
+        
+        # Apply Time Filter
+        if is_time_sensitive_series and market_date:
+            if market_date > cutoff_time:
+                should_show = False
+        
+        if should_show:
+            m['_sort_date'] = market_date if market_date else datetime.datetime.max
+            live_markets.append(m)
+            seen_events.add(event_id)
     
-    await ctx.send(embed=embed)
+    # Sort: Earliest games first. Futures (max date) last.
+    live_markets.sort(key=lambda x: x['_sort_date'])
+
+    # Footer with AI Usage if available
+    global ai_request_count
+    
+    # User requested AI Usage counter primarily
+    current_time_str = datetime.datetime.now().strftime('%H:%M:%S')
+    footer_text = f"Series: {series_ticker} | AI Usage: {ai_request_count}/{AI_REQUEST_LIMIT} | {current_time_str}"
+    
+    if not live_markets:
+        embed = discord.Embed(
+            title=f"🔴 Active Search: '{query}'", 
+            description=f"**No active matches for {series_ticker} in next 36h.**",
+            color=discord.Color.red()
+        )
+        embed.set_footer(text=footer_text)
+        if message_to_edit: await message_to_edit.edit(content="", embed=embed)
+        else: await ctx.send(embed=embed)
+        return
+        
+    embed = discord.Embed(
+        title=f"🟢 Active Markets: {series_ticker}",
+        description=f"Found {len(live_markets)} active events.",
+        color=discord.Color.green()
+    )
+    
+    # Increased Limit to 10
+    display_limit = 10
+    for m in live_markets[:display_limit]:
+            # Format date for display if available
+            date_str = ""
+            if '_sort_date' in m and m['_sort_date'] != datetime.datetime.max:
+                date_str = f" | 📅 {m['_sort_date'].strftime('%b %d')}"
+            
+            embed.add_field(
+            name=f"{m.get('title')}{date_str}",
+            value=f"ID: `{m.get('event_ticker')}`\nYes: `{m.get('yes_bid', 'N/A')}¢` | No: `{m.get('no_bid', 'N/A')}¢`",
+            inline=False
+        )
+    
+    embed.set_footer(text=footer_text)
+    
+    if message_to_edit: await message_to_edit.edit(content="", embed=embed)
+    else: await ctx.send(embed=embed)
+
+
+@bot.command()
+async def search(ctx, *, query):
+    """
+    Search is currently disabled for maintenance.
+    """
+    await ctx.send("🚧 **Search is temporarily disabled for maintenance.**\nPlease try `!balance` or `!positions` instead.")
+    return
+
 
 async def order_fill_listener():
     """
@@ -273,11 +470,16 @@ async def order_fill_listener():
     """
     # Wait until the bot is fully ready before connecting
     await bot.wait_until_ready()
-    channel = bot.get_channel(DISCORD_CHANNEL_ID)
+    await bot.wait_until_ready()
     
-    if not channel:
-        print(f"Error: Channel with ID {DISCORD_CHANNEL_ID} not found.")
+    try:
+        channel = await bot.fetch_channel(DISCORD_CHANNEL_ID)
+    except Exception as e:
+        print(f"Error fetching channel {DISCORD_CHANNEL_ID}: {e}")
         return
+
+    print(f"WebSocket Listener attached to channel: {channel.name}")
+
 
     print("Starting WebSocket Listener...")
 
