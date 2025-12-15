@@ -36,7 +36,7 @@ async def on_ready():
     # Start the WebSocket background task
     bot.loop.create_task(order_fill_listener())
 
-@bot.command()
+@bot.command(aliases=['bal'])
 async def balance(ctx):
     """
     Fetches the user's current cash balance on Kalshi.
