@@ -148,7 +148,9 @@ async def search(ctx, *, query):
     global ai_request_count, ai_window_start
 
     # Fetch more results to give the AI a good pool to choose from
-    path = f"/trade-api/v2/markets?query={query}&limit=20&status=open"
+    # Kalshi's default search is fuzzy and often returns irrelevant top results.
+    # We increase the limit to 100 to catch relevant markets that might be buried.
+    path = f"/trade-api/v2/markets?query={query}&limit=100&status=open"
     data, error = await fetch_data(path)
     
     if error:
@@ -177,10 +179,12 @@ async def search(ctx, *, query):
         ai_request_count += 1
         
         # Prepare data for AI
+        # We send Ticker + Title + Event Ticker to give AI maximum context
         market_list_str = "\n".join([f"{m['ticker']}: {m['title']}" for m in markets])
         prompt = f"""
         You are a financial assistant. 
         Select the top 5 most relevant markets for the query '{query}' from the list below.
+        If NO markets are relevant to '{query}', return NOTHING (empty string).
         Return ONLY the tickers, separated by commas. Nothing else.
         
         List:
@@ -188,26 +192,36 @@ async def search(ctx, *, query):
         """
         
         try:
-            model = genai.GenerativeModel('gemini-1.5-flash')
+            model = genai.GenerativeModel('gemini-flash-latest')
             response = model.generate_content(prompt)
             
             # Parse response (Comm separated tickers)
-            relevant_tickers = [t.strip() for t in response.text.split(',')]
-            
-            # Filter markets based on AI selection, preserving order of relevance
-            market_map = {m['ticker']: m for m in markets}
-            for t in relevant_tickers:
-                if t in market_map:
-                    final_markets.append(market_map[t])
-            
-            # Fallback if AI hallucinates tickers or returns nothing valid
-            if not final_markets:
-                final_markets = markets[:5]
+            text = response.text.strip()
+            if not text:
+                final_markets = [] # Explicitly empty if AI said so
+            else:
+                relevant_tickers = [t.strip() for t in text.split(',')]
                 
-            headers_text = f"✨ Results curated by Gemini AI (Usage: {ai_request_count}/{AI_REQUEST_LIMIT})"
+                # Filter markets based on AI selection, preserving order of relevance
+                market_map = {m['ticker']: m for m in markets}
+                for t in relevant_tickers:
+                    if t in market_map:
+                        final_markets.append(market_map[t])
+            
+            # Fallback logic
+            if not final_markets:
+                # If AI returned nothing, it means nothing was relevant.
+                # Don't show garbage. Show message.
+                headers_text = f"⚠️ Gemini AI found no relevant markets for sure."
+                # We leave final_markets empty so loop below does nothing, 
+                # but we need to handle the 'empty embed' case.
+            else:
+                headers_text = f"✨ Results curated by Gemini AI (Usage: {ai_request_count}/{AI_REQUEST_LIMIT})"
             
         except Exception as e:
             print(f"AI Error: {e}")
+            # If AI errors, we unfortunately have to fallback to top 5 garbage or show error?
+            # Fallback is safer for reliability, but might show junk.
             final_markets = markets[:5]
             headers_text = "⚠️ AI failed, showing top standard results."
     
@@ -223,8 +237,15 @@ async def search(ctx, *, query):
         color=discord.Color.gold()
     )
 
+    if not final_markets:
+        embed.description += "\nNo relevant markets found."
+
     for m in final_markets:
         try:
+            # UI Fix: Ticker is internal ID. Title is the human readable connection.
+            # Event Ticker is the group.
+            # User wants: Title as main Header. Event ID below.
+            
             ticker = m.get("ticker")
             event_ticker = m.get("event_ticker", "N/A")
             title = m.get("title")
@@ -235,8 +256,8 @@ async def search(ctx, *, query):
             n_txt = f"{no_price}¢" if no_price else "N/A"
 
             embed.add_field(
-                name=ticker,
-                value=f"**{title}**\nEvent ID: `{event_ticker}`\n🟢 Yes: `{y_txt}` | 🔴 No: `{n_txt}`",
+                name=title, # Set Title as the Field Name (Bold top text)
+                value=f"Event ID: `{event_ticker}`\n🟢 Yes: `{y_txt}` | 🔴 No: `{n_txt}`",
                 inline=False
             )
         except Exception as e:
