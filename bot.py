@@ -19,13 +19,14 @@ DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
 
-# REST API Base URL
+# REST API Base URL (For balances, positions, searches)
 BASE_URL = "https://api.elections.kalshi.com"
 
-# WebSocket URL
+# WebSocket URL (For real-time streaming alerts)
 WS_URL = "wss://api.elections.kalshi.com/trade-api/ws/v2"
 
 # Bot Setup
+# We enable 'message_content' so the bot can read commands like "!balance"
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -36,6 +37,22 @@ async def on_ready():
     # Start the WebSocket background task
     bot.loop.create_task(order_fill_listener())
 
+async def fetch_data(path, method="GET"):
+    """Generic helper to fetch data from Kalshi API with signing."""
+    try:
+        headers = sign_request(method, path, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
+    except Exception as e:
+        return None, f"Error signing request: {e}"
+
+    url = f"{BASE_URL}{path}"
+    async with aiohttp.ClientSession() as session:
+        async with session.get(url, headers=headers) as response:
+            if response.status == 200:
+                return await response.json(), None
+            else:
+                error_text = await response.text()
+                return None, f"Status: {response.status}\nError: {error_text}"
+
 @bot.command(aliases=['bal'])
 async def balance(ctx):
     """
@@ -43,40 +60,119 @@ async def balance(ctx):
     Endpoint: GET /trade-api/v2/portfolio/balance
     """
     path = "/trade-api/v2/portfolio/balance"
-    method = "GET"
+    # The 'await' keyword pauses execution here until the API replies, 
+    # ensuring the bot doesn't freeze for other users.
+    data, error = await fetch_data(path)
     
-    # 1. Generate Headers
-    try:
-        headers = sign_request(method, path, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
-    except Exception as e:
-        await ctx.send(f"Error signing request: {e}")
+    if error:
+        await ctx.send(f"Failed to fetch balance. {error}")
         return
 
-    # 2. Make the Request
-    url = f"{BASE_URL}{path}"
-    async with aiohttp.ClientSession() as session:
-        async with session.get(url, headers=headers) as response:
-            if response.status == 200:
-                data = await response.json()
-                # Assuming the response structure is like { "balance": 125000 } in cents
-                # Adjust based on exact API response structure if needed. 
-                # Documentation usually says balance is integer cents.
-                
-                # Careful: The response might be nested under 'balance' key or similar if it returns a wrapper object.
-                # Let's assume standard Kalshi v2 response format: {"balance": 10000}
-                
-                cents = data.get("balance", 0)
-                dollars = cents / 100
-                formatted_balance = f"${dollars:,.2f}"
-                await ctx.send(f"Current Balance: **{formatted_balance}**")
-            else:
-                error_text = await response.text()
-                await ctx.send(f"Failed to fetch balance. Status: {response.status}\nError: {error_text}")
+    # Check structure. Usually data['balance']
+    cents = data.get("balance", 0)
+    dollars = cents / 100
+    formatted_balance = f"${dollars:,.2f}"
+    await ctx.send(f"Current Balance: **{formatted_balance}**")
+
+@bot.command(aliases=['pos'])
+async def positions(ctx):
+    """
+    Fetches active positions (where count > 0).
+    Endpoint: GET /trade-api/v2/portfolio/positions
+    """
+    path = "/trade-api/v2/portfolio/positions"
+    data, error = await fetch_data(path)
+
+    if error:
+        await ctx.send(f"Failed to fetch positions. {error}")
+        return
+
+    # Response structure: {"positions": [...]}
+    all_positions = data.get("positions", [])
+    
+    # Filter for active positions only
+    active_positions = [p for p in all_positions if p.get('position', 0) > 0]
+
+    if not active_positions:
+        await ctx.send("No active positions found.")
+        return
+
+    embed = discord.Embed(title="📊 Active Positions", color=discord.Color.blue())
+    
+    for p in active_positions:
+        ticker = p.get('ticker', 'Unknown')
+        side = p.get('side', 'Unknown').upper()
+        count = p.get('position', 0)
+        # Average price is usually 'fees_paid' + 'cost_basis' logic or directly provided?
+        # V2 Docs: market_exposure, realization, or sometimes fees are separate.
+        # Simple lookup: 'aggr_price' or 'fees_paid' / count?
+        # Let's rely on what's typically returned. 'realized_pnl', 'fees_paid', 'cost_basis'.
+        # For simplicity, we'll check if 'avg_price' or similar exists, otherwise we might skip it or calc cost/count.
+        # Common Kalshi field: `fees_paid` is total cost usually (excluding fees? or including?).
+        # Let's assume there is no direct 'avg_price' field in some endpoints.
+        # But actually, 'portfolio/positions' usually returns 'market_exposure' (cents risked).
+        # Let's try to calculate: (market_exposure / count).
+        
+        market_exposure = p.get('market_exposure', 0)
+        avg_price = (market_exposure / count) if count > 0 else 0
+        
+        embed.add_field(
+            name=ticker, 
+            value=f"Side: **{side}**\nCount: `{count}`\nAvg Price: `{avg_price:.1f}¢`", 
+            inline=True
+        )
+
+    await ctx.send(embed=embed)
+
+@bot.command()
+async def search(ctx, *, query):
+    """
+    Search for active markets and check prices.
+    Endpoint: GET /trade-api/v2/markets
+    """
+    # 1. Search Markets
+    path = f"/trade-api/v2/markets?query={query}&limit=5&status=active"
+    data, error = await fetch_data(path)
+    
+    if error:
+        await ctx.send(f"Search failed. {error}")
+        return
+
+    markets = data.get("markets", [])
+    if not markets:
+        await ctx.send(f"No active markets found for '{query}'.")
+        return
+
+    embed = discord.Embed(title=f"🔎 Search Results: '{query}'", color=discord.Color.gold())
+
+    for m in markets:
+        try:
+            ticker = m.get("ticker")
+            event_ticker = m.get("event_ticker", "N/A")
+            title = m.get("title")
+            yes_price = m.get("yes_bid")
+            no_price = m.get("no_bid")
+
+            y_txt = f"{yes_price}¢" if yes_price else "N/A"
+            n_txt = f"{no_price}¢" if no_price else "N/A"
+
+            embed.add_field(
+                name=ticker,
+                value=f"**{title}**\nEvent ID: `{event_ticker}`\n🟢 Yes: `{y_txt}` | 🔴 No: `{n_txt}`",
+                inline=False
+            )
+        except Exception as e:
+            print(f"Error processing a market result: {e}")
+            continue
+    
+    await ctx.send(embed=embed)
 
 async def order_fill_listener():
     """
     Background task to listen for 'fill' messages on Kalshi WebSocket.
+    This runs parallel to the main bot loop.
     """
+    # Wait until the bot is fully ready before connecting
     await bot.wait_until_ready()
     channel = bot.get_channel(DISCORD_CHANNEL_ID)
     
@@ -90,6 +186,7 @@ async def order_fill_listener():
         try:
             # 1. Sign the connection request (Handshake)
             path = "/trade-api/ws/v2"
+
             method = "GET"
             headers = sign_request(method, path, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
             
