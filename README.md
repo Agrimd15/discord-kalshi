@@ -3,8 +3,10 @@
 A powerful, open-source Discord bot that integrates with the [Kalshi Prediction Market](https://kalshi.com/) API (v2). 
 
 **Features:**
-*   💰 **Real-time Balance:** Check your portfolio cash balance instantly with `!balance`.
-*   🚨 **Instant Alerts:** Get notified immediately in Discord when your orders are filled.
+- **!balance**: Check your current Kalshi cash balance.
+- **!positions**: View your active bets and average entry price.
+- **!search <query>**: Find markets and see live Yes/No prices.
+- **Real-time Alerts**: Automatically posts to a Discord channel when an order is filled.
 *   🔒 **Secure:** Uses RSA-SHA256 signing for all requests; keys stay local.
 
 ---
@@ -20,6 +22,20 @@ This software is for educational purposes only. It is not financial advice. Use 
 *   A **Discord** account.
 
 ---
+
+### 🧠 AI Upgrade (Optional)
+To enable **Smart Semantic Search**, this bot integrates with **Google Gemini**.
+
+### How to Enable:
+1.  **Get a Free API Key:**
+    *   Go to [Google AI Studio](https://aistudio.google.com/app/apikey).
+    *   Click **"Create API Key"**.
+2.  **Add to `.env`:**
+    *   Open your `.env` file and add: `GEMINI_API_KEY=your_key_here`
+3.  **Restart Bot:**
+    *   The bot will detect the key and automatically upgrading `!search` commands.
+
+> **Note:** The free tier is rate-limited to **15 requests/minute**. The bot includes a built-in counter and will automatically fallback to standard search if you exceed this limit.
 
 ## 🛠️ Step-by-Step Setup Guide
 
@@ -90,6 +106,8 @@ This software is for educational purposes only. It is not financial advice. Use 
 
 2.  **Commands:**
     *   `!balance` - Shows your current available cash.
+    *   `!positions` - Shows your active bets/positions.
+    *   `!search <query>` - Searches for markets (e.g., `!search fed`).
 
 3.  **Auto-Alerts:**
     *   The bot will now silently listen in the background. As soon as one of your orders fills on Kalshi, it will post an Embed to your chosen channel.

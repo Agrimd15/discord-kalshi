@@ -29,15 +29,17 @@ def sign_request(method, path, key_id, private_key_path):
     payload = f"{timestamp}{method}{path}"
     
     # 3. Load the private key
+    # We read the .pem file as bytes ('rb') and load it into a cryptography object
     with open(private_key_path, "rb") as key_file:
         private_key = serialization.load_pem_private_key(
             key_file.read(),
-            password=None
+            password=None # Kalshi keys usually don't have a password
         )
 
     # 4. Sign the payload using RSA-PSS with SHA256
+    # This is the cryptographic standard Kalshi requires to prove YOU are the one sending the request.
     signature = private_key.sign(
-        payload.encode('utf-8'),
+        payload.encode('utf-8'), # Convert string to bytes
         padding.PSS(
             mgf=padding.MGF1(hashes.SHA256()),
             salt_length=padding.PSS.MAX_LENGTH
@@ -46,6 +48,7 @@ def sign_request(method, path, key_id, private_key_path):
     )
 
     # 5. Encode the signature in Base64
+    # The signature is raw bytes, so we convert it to a string for the HTTP header
     signature_b64 = base64.b64encode(signature).decode('utf-8')
 
     # 6. Return the headers

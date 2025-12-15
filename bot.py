@@ -7,6 +7,8 @@ import websockets
 import json
 import asyncio
 from dotenv import load_dotenv
+import google.generativeai as genai
+import time
 
 # Import our helper function
 from auth import sign_request
@@ -17,7 +19,20 @@ load_dotenv()
 DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
 DISCORD_CHANNEL_ID = int(os.getenv("DISCORD_CHANNEL_ID"))
 KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
+KALSHI_KEY_ID = os.getenv("KALSHI_KEY_ID")
 KALSHI_PRIVATE_KEY_PATH = os.getenv("KALSHI_PRIVATE_KEY_PATH")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+
+# Gemini Setup
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+else:
+    print("Warning: GEMINI_API_KEY not found. AI features will be disabled.")
+
+# Rate Limiting for AI
+AI_REQUEST_LIMIT = 15
+ai_request_count = 0
+ai_window_start = time.time()
 
 # REST API Base URL (For balances, positions, searches)
 BASE_URL = "https://api.elections.kalshi.com"
@@ -127,11 +142,13 @@ async def positions(ctx):
 @bot.command()
 async def search(ctx, *, query):
     """
-    Search for active markets and check prices.
+    Search for active markets utilizing AI for semantic relevance if available.
     Endpoint: GET /trade-api/v2/markets
     """
-    # 1. Search Markets
-    path = f"/trade-api/v2/markets?query={query}&limit=5&status=active"
+    global ai_request_count, ai_window_start
+
+    # Fetch more results to give the AI a good pool to choose from
+    path = f"/trade-api/v2/markets?query={query}&limit=20&status=open"
     data, error = await fetch_data(path)
     
     if error:
@@ -143,9 +160,70 @@ async def search(ctx, *, query):
         await ctx.send(f"No active markets found for '{query}'.")
         return
 
-    embed = discord.Embed(title=f"🔎 Search Results: '{query}'", color=discord.Color.gold())
+    # AI Reranking Logic
+    final_markets = []
+    headers_text = ""
+    
+    # Check if Gemini is configured and we are within rate limits
+    current_time = time.time()
+    if current_time - ai_window_start > 60:
+        # Reset window
+        ai_request_count = 0
+        ai_window_start = current_time
 
-    for m in markets:
+    use_ai = False
+    if GEMINI_API_KEY and ai_request_count < AI_REQUEST_LIMIT:
+        use_ai = True
+        ai_request_count += 1
+        
+        # Prepare data for AI
+        market_list_str = "\n".join([f"{m['ticker']}: {m['title']}" for m in markets])
+        prompt = f"""
+        You are a financial assistant. 
+        Select the top 5 most relevant markets for the query '{query}' from the list below.
+        Return ONLY the tickers, separated by commas. Nothing else.
+        
+        List:
+        {market_list_str}
+        """
+        
+        try:
+            model = genai.GenerativeModel('gemini-1.5-flash')
+            response = model.generate_content(prompt)
+            
+            # Parse response (Comm separated tickers)
+            relevant_tickers = [t.strip() for t in response.text.split(',')]
+            
+            # Filter markets based on AI selection, preserving order of relevance
+            market_map = {m['ticker']: m for m in markets}
+            for t in relevant_tickers:
+                if t in market_map:
+                    final_markets.append(market_map[t])
+            
+            # Fallback if AI hallucinates tickers or returns nothing valid
+            if not final_markets:
+                final_markets = markets[:5]
+                
+            headers_text = f"✨ Results curated by Gemini AI (Usage: {ai_request_count}/{AI_REQUEST_LIMIT})"
+            
+        except Exception as e:
+            print(f"AI Error: {e}")
+            final_markets = markets[:5]
+            headers_text = "⚠️ AI failed, showing top standard results."
+    
+    else:
+        # Fallback to standard top 5
+        final_markets = markets[:5]
+        if GEMINI_API_KEY:
+             headers_text = f"⚠️ Rate limit reached ({ai_request_count}/{AI_REQUEST_LIMIT}), showing top standard results."
+
+    embed = discord.Embed(
+        title=f"🔎 Search Results: '{query}'", 
+        description=headers_text,
+        color=discord.Color.gold()
+    )
+
+    for m in final_markets:
         try:
             ticker = m.get("ticker")
             event_ticker = m.get("event_ticker", "N/A")

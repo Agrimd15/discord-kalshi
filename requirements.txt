@@ -1,5 +1,6 @@
 discord.py
-websockets
+python-dotenv
 aiohttp
 cryptography
-python-dotenv
+websockets
+google-generativeai
