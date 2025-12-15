@@ -1,74 +1,111 @@
 # Discord Kalshi Bot 🤖
 
-A powerful, AI-driven Discord bot for browsing live Kalshi prediction markets. Features smart categorization, typo tolerance, and real-time filtering.
+A robust Discord bot for the [Kalshi Prediction Market](https://kalshi.com). Browse sports markets, check live lines, manage your portfolio, and track orders directly from your Discord server.
 
-## ✨ Key Features
+## Features
+- **Interactive menu System**: Browse sports (NFL, NBA, EPL, etc.) using Discord buttons and dropdowns.
+- **Filtering**: Automatically filters out "fluff" (awards, drafts) to show only **Games**, **Spreads**, and **Totals**.
+- **Live Odds**: Displays events with start times and current Yes/No prices (Ask/Bid).
+- **Portfolio Management**: Check your balance (`!balance`) and active positions (`!positions`).
+- **Real-time Stream**: (Optional) WebSocket integration for live order fill alerts.
 
-*   **Smart Search**: `!search nfl` finds games. `!search politics` finds election markets.
-*   **Interactive Menu**: `!search sports` opens a clickable menu to browse NFL, NBA, NHL, and more.
-*   **Typo Tolerance**: Type `!search footbll` or `!search nhhl` and the bot will figure it out!
-*   **Live Game Filters**: 
-    *   Shows strictly **imminent games** (Tonight/Tomorrow) to reduce clutter.
-    *   Sorts by kickoff time.
-*   **Futures Support**: `!search nfl futures` bypasses time filters to show Season Winners and Super Bowl odds.
-*   **Account Tools**: Check your `!balance` and active `!positions`.
-*   **AI Powered**: Uses Gemini to categorize generic queries (e.g., "funny bets").
+## Prerequisites
+- Python 3.9 or higher
+- A Kalshi Account (verified)
+- A Discord Account (to create a bot)
 
-## 🚀 Setup
+---
 
-1.  **Install Dependencies**:
-    ```bash
-    pip install -r requirements.txt
-    ```
-2.  **Environment Variables**:
-    Create a `.env` file with your credentials or use the `.env.example` as a template:
-    ```env
-    DISCORD_TOKEN=your_token
-    DISCORD_CHANNEL_ID=your_channel_id
-    KALSHI_KEY_ID=your_key_id
-    KALSHI_PRIVATE_KEY_PATH=/path/to/key.pem
-    GEMINI_API_KEY=your_gemini_key
-    ```
-    
-    ### 🔑 Obtaining Credentials
-    
-    **1. Discord Token:**
-    *   Go to the [Discord Developer Portal](https://discord.com/developers/applications).
-    *   Create a "New Application" -> "Bot".
-    *   Enable "Message Content Intent" (Critical!).
-    *   Click "Reset Token" to get your `DISCORD_TOKEN`.
-    *   Invite the bot to your server using the "OAuth2" -> "URL Generator" (scopes: `bot`, permissions: `Read Messages/View Channels`, `Send Messages`).
+## 🛠️ Setup Guide
 
-    **2. Kalshi Keys:**
-    *   Log in to [Kalshi](https://kalshi.com/).
-    *   Go to **Account** -> **API Management**.
-    *   Create a NEW Key. It will give you a **Key ID** (`KALSHI_KEY_ID`) and prompt you to download a `.pem` file.
-    *   Save this `.pem` file to your project folder (e.g., `kalshi-key.pem`).
-    *   Set `KALSHI_PRIVATE_KEY_PATH` to the full path of this `.pem` file.
+### 1. Discord Bot Setup
+1. Go to the [Discord Developer Portal](https://discord.com/developers/applications).
+2. Click **New Application** and name it (e.g., "KalshiBot").
+3. Go to the **Bot** tab on the left and click **Add Bot**.
+4. **Token**: Click "Reset Token" to reveal your **Bot Token**. Copy this safe.
+5. **Invite**: Go to **OAuth2** -> **URL Generator**.
+   - Scopes: check `bot`.
+   - Bot Permissions: check `Send Messages`, `Embed Links`, `Read Message History`, `View Channels`.
+   - Copy the generated URL and invite the bot to your server.
 
-    **3. Gemini API Key (for AI):**
-    *   Visit [Google AI Studio](https://aistudio.google.com/app/apikey).
-    *   Click "Get API Key" -> "Create API Key".
-    *   Copy string to `GEMINI_API_KEY`.
-3.  **Run the Bot**:
-    ```bash
-    python3 bot.py
-    ```
+### 2. Getting the Channel ID
+To let the bot know where to post (and for the optional stream), needs a Channel ID.
+1. Open Discord App Settings -> **Advanced**.
+2. Enable **Developer Mode**.
+3. Right-click the channel you want the bot to use and click **Copy Channel ID**.
 
-## 📜 Commands
+### 3. Kalshi API Keys
+1. Log in to [Kalshi](https://kalshi.com).
+2. Go to **Account Settings** -> **API Keys** (or [click here](https://kalshi.com/account/settings/keys)).
+3. Click **Add API Key**.
+4. This will give you a **Key ID** (UUID) and download a private key file (`.key` or `.pem`).
+   - **Key ID**: e.g., `12345678-abcd-1234...`
+   - **Private Key**: Save this file (e.g., `kalshi.key`) into the project folder.
+
+---
+
+## 💻 Installation
+
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/yourusername/discord-kalshi.git
+   cd discord-kalshi
+   ```
+
+2. **Install Dependencies**:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+3. **Configure Environment**:
+   Duplicate the example file:
+   ```bash
+   cp .env.example .env
+   ```
+   Edit `.env` and fill in your details:
+   ```ini
+   DISCORD_TOKEN=your_discord_token_here
+   DISCORD_CHANNEL_ID=123456789012345678
+   KALSHI_KEY_ID=your_kalshi_key_id
+   KALSHI_PRIVATE_KEY_PATH=kalshi.key
+   ```
+   *Note: Ensure `kalshi.key` matches the filename you saved in step 3.*
+
+4. **Generate Market Hierarchy**:
+   The bot uses a locally cached map of sports series to ensure fast, strict searching.
+   Run this script to fetch active markets and build the menu:
+   ```bash
+   python3 fetch_hierarchy.py
+   ```
+   *Output: `Successfully wrote Sports hierarchy...`*
+
+5. **Run the Bot**:
+   ```bash
+   python3 bot.py
+   ```
+
+---
+
+## 🎮 Usage
+
+**Prefix**: `!`
 
 | Command | Description |
 | :--- | :--- |
-| `!search <query>` | Search for markets/events. |
-| `!search sports` | Open the interactive Sports Menu. |
-| `!balance` | View your cash balance. |
-| `!positions` | View active trades. |
-| `!commands` | Show help menu. |
-
-## 🛠 Troubleshooting
-
-*   **"No relevant series found"**: Try a broader term or check your spelling (though the bot handles most typos!).
-*   **Rate Limits**: The AI has a usage limit (15/min). Menus do not consume AI quota.
+| `!search` | Opens the **Interactive Sports Menu** (Football, Basketball, etc.). |
+| `!search <query>` | Strict search for a specific ticker (e.g. `!search KXNBAGAMES`). |
+| `!balance` | Shows your Cash, Credit, and Portfolio Value. |
+| `!positions` | Lists your active positions with Profit/Loss (if available). |
+| `!orders` | (Coming Soon) Manage/Cancel open orders. |
 
 ---
-*Built with Discord.py & Kalshi v2 API*
+
+## 📂 Project Structure
+- `bot.py`: Main entry point. Handles Discord commands and Menu UI.
+- `fetch_hierarchy.py`: Scraper script. Fetches ~7000 series, filters for "Games", generates `kalshi_hierarchy.py`.
+- `kalshi_hierarchy.py`: Auto-generated file containing the sports map.
+- `auth.py`: Handles RSA-PSS signing for Kalshi API V2.
+- `stream.py`: Async WebSocket listener for order fills.
+
+## Security Note
+Never share your `.env` file or your `kalshi.key` private key. The `.gitignore` is set up to exclude them.
