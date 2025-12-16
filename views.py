@@ -1,4 +1,3 @@
-
 import discord
 import series_manager
 import market_manager

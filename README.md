@@ -1,4 +1,3 @@
-
 # Kalshi Discord Bot 🤖
 
 A sophisticated Discord bot for tracking your Kalshi portfolio and browsing prediction markets in real-time. Features an interactive button-based menu for fetching live odds.
