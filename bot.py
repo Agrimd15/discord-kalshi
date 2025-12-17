@@ -5,16 +5,17 @@ import aiohttp
 from dotenv import load_dotenv
 
 # Modules
-from auth import sign_request
-import series_manager
+from managers.auth import sign_request
+from managers import series_manager
+from managers import polymarket_manager
 import views # Phase 3 UI
-import portfolio_manager
+from managers import portfolio_manager
 from discord.ext import tasks
 import json
 import asyncio
 from datetime import datetime
 import re
-import market_manager
+from managers import market_manager
 
 # Load environment variables
 from pathlib import Path
@@ -56,6 +57,24 @@ async def fetch_data(path, method="GET"):
             else:
                 text = await response.text()
                 return None, f"Status {response.status}: {text}"
+
+@bot.event
+async def on_ready():
+    print(f"Logged in as {bot.user}")
+    
+    # Load Cogs
+    try:
+        await bot.load_extension("cogs.mapper")
+        print("Loaded cogs.mapper")
+        # Sync Command Tree
+        await bot.tree.sync()
+        print("Slash commands synced")
+    except Exception as e:
+        print(f"Failed to load cogs: {e}")
+
+    # Start loop
+    if not order_monitor.is_running():
+        order_monitor.start()
 
 # --- Bot Events ---
 @bot.event
@@ -280,14 +299,62 @@ async def search(ctx):
 
 # 2. BALANCE
 @bot.command(aliases=['bal'])
-async def balance(ctx):
-    """Check account balance."""
-    data, error = await fetch_data("/trade-api/v2/portfolio/balance")
-    if error:
-        await ctx.send(f"Error: {error}")
-        return
-    cents = data.get("balance", 0)
-    await ctx.send(f"Balance: **${cents/100:,.2f}**")
+async def balance(ctx, account: str = "all"):
+    """
+    Check account balance.
+    Usage: !bal (Combined), !bal k (Kalshi), !bal p (Polymarket)
+    """
+    account = account.lower()
+    
+    # helper to get kalshi
+    async def get_kalshi():
+        d, e = await fetch_data("/trade-api/v2/portfolio/balance")
+        if e: return 0.0, f"Error: {e}"
+        return d.get("balance", 0) / 100.0, None # Return dollars
+
+    # helper to get poly
+    async def get_poly():
+        val, e = await polymarket_manager.get_balance()
+        if e: return 0.0, e
+        # Assuming val is dollars float if implemented
+        try:
+             return float(val), None
+        except:
+             return 0.0, "Invalid Data"
+
+    if account == "all":
+        # fetch both
+        k_val, k_err = await get_kalshi()
+        p_val, p_err = await get_poly()
+        
+        embed = discord.Embed(title="Portfolio Balance", color=discord.Color.blue(), timestamp=datetime.now())
+        
+        # Kalshi Field
+        k_str = f"${k_val:,.2f}" if not k_err else f"⚠️ {k_err}"
+        embed.add_field(name="Kalshi", value=k_str, inline=True)
+        
+        # Poly Field
+        p_str = f"${p_val:,.2f}" if not p_err else f"⚠️ {p_err}"
+        embed.add_field(name="Polymarket", value=p_str, inline=True)
+        
+        # Total
+        total = k_val + p_val
+        embed.description = f"**Total Combined**: ${total:,.2f}"
+        
+        await ctx.send(embed=embed)
+
+    elif account.startswith("k"):
+        val, err = await get_kalshi()
+        msg = f"**Kalshi Balance**: ${val:,.2f}" if not err else f"[Kalshi] Error: {err}"
+        await ctx.send(msg)
+        
+    elif account.startswith("p"):
+        val, err = await get_poly()
+        msg = f"**Polymarket Balance**: ${val:,.2f}" if not err else f"[Polymarket] Error: {err}"
+        await ctx.send(msg)
+        
+    else:
+        await ctx.send("Invalid account. Use `!bal` (Both), `!bal k` (Kalshi), or `!bal p` (Polymarket).")
 
 # 3. POSITIONS
 @bot.command(aliases=['pos'])
@@ -325,7 +392,7 @@ async def help(ctx):
     )
     
     embed.add_field(name="`!search`", value="Browse sports and check live odds.", inline=False)
-    embed.add_field(name="`!balance`", value="Check your available cash balance.", inline=False)
+    embed.add_field(name="`!balance [k/p]`", value="Check balance. Default=Combined. `k`=Kalshi, `p`=Polymarket.", inline=False)
     embed.add_field(name="`!positions`", value="See your active trades and exposure.", inline=False)
     
     embed.set_footer(text="Trade Responsibly! • Kalshi API")

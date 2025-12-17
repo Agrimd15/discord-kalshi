@@ -46,18 +46,33 @@ You need to create a `.env` file in the root directory.
     *   Copy the **Key ID** (UUID).
     *   **IMPORTANT**: Download the `.pem` file (Private Key). Save it as `kalshi.pem` in the bot folder (or note its path).
 
-3.  **Discord Channel ID**:
+3.  **Polymarket Keys (Optional for !bal p)**:
+    *   Log in to [Polymarket](https://polymarket.com).
+    *   Go to **Profile** (Top Right) -> **Settings** -> **API Keys**.
+    *   Click **Create API Key**.
+    *   Copy the **API Key**, **Secret**, and **Passphrase**.
+
+4.  **Discord Channel ID**:
     *   In Discord, go to **User Settings** -> **Advanced** -> Enable **Developer Mode**.
     *   Right-click the channel you want the bot to speak in (or stream to).
     *   Click **Copy Channel ID**.
 
-4.  **Create `.env`**:
+5.  **Create `.env`**:
     ```env
     DISCORD_TOKEN=your_discord_bot_token_here
     KALSHI_KEY_ID=your_kalshi_key_id_uuid_here
     KALSHI_PRIVATE_KEY_PATH=./kalshi.pem
     DISCORD_CHANNEL_ID=your_channel_id_here
+    
+    # Polymarket
+    POLY_API_KEY=your_key_here
+    POLY_SECRET=your_secret_here
+    POLY_PASSPHRASE=your_passphrase_here
+    POLY_PROXY_ADDRESS=your_proxy_address_0x...
+    POLY_WALLET_KEY=your_wallet_private_key_0x...
     ```
+    *   **Note**: To fetch balances, Polymarket requires signing requests with your Wallet Private Key (the one connected to Polymarket/Metamask) and knowing your Proxy Address.
+    *   **Security**: Be extremely careful with your Private Key. Never share it. ensure `.env` is in `.gitignore`.
 
 ### 4. Running the Bot
 
@@ -73,18 +88,19 @@ If successful, you will see `Logged in as KalshiBot`.
 | Command | Alias | Description |
 | :--- | :--- | :--- |
 | `!help` | | Shows the welcome menu and command list. |
-| `!search` | | Opens the Interactive Sports Menu. |
-| `!balance` | `!bal` | Displays your available cash balance. |
+| `!search` | | Opens the Interactive Sports Menu (with Auto-Polymarket Matching). |
+| `!balance` | `!bal` | Displays balances. `!bal k` (Kalshi), `!bal p` (Poly), or `!bal` (Both). |
 | `!positions` | `!pos` | Lists your active trading positions. |
+| `/setup_arb` | | **(Admin)** Interactive tool to map Kalshi events to Polymarket for Arbitrage. |
 
 ---
 
 ## Customization (Developers) 👨‍💻
 
 ### Adding New Sports / Series
-To make the bot search for new leagues (e.g., Baseball, Elections), edit **`series_manager.py`**.
+To make the bot search for new leagues (e.g., Baseball, Elections), edit **`managers/series_manager.py`**.
 
-1.  Open `series_manager.py`.
+1.  Open `managers/series_manager.py`.
 2.  Locate the `ALLOWED_SERIES` dictionary.
 3.  Add a new entry following the format:
 
@@ -107,9 +123,24 @@ To make the bot search for new leagues (e.g., Baseball, Elections), edit **`seri
 ## Structure
 *   `bot.py`: Main entry point. Handles commands and startup.
 *   `views.py`: Contains the Discord UI logic (Buttons, Selects, Embeds).
-*   `series_manager.py`: Manages the list of allowed sports and their API tickers.
-*   `market_manager.py`: Fetches logic. Groups markets into Types (Spread vs Total).
-*   `auth.py`: Handles RSA signature generation for Kalshi API.
+*   `cogs/`:
+    *   `mapper.py`: Slash command for interactive Arbitrage Mapping.
+*   `managers/`:
+    *   `market_manager.py`: Kalshi API fetching logic.
+    *   `series_manager.py`: Manages the list of allowed sports and their API tickers.
+    *   `portfolio_manager.py`: Handles Balance and Position fetching.
+    *   `polymarket_manager.py`: Polymarket API fetching and matching logic.
+    *   `mapping_logic.py`: Logic for parsing tickers and matching arbitrage pairs.
+    *   `auth.py`: Handles RSA signature generation for Kalshi API.
+
+## Marketplace Integration 🌐
+The bot automatically searches for matching events on Polymarket using fuzzy string matching on the event title.
+-   If a match is found, it displays the Polymarket odds (Yes/No cents) below the Kalshi data.
+-   A link to the Polymarket event is added.
+
+**Arbitrage Mapping**:
+Admins can use `/setup_arb <KALSHI_TICKER>` to interactively find and map Polymarket events to Kalshi events, generating the configuration code needed for arbitrage strategies.
+
 
 ---
 

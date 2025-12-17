@@ -1,6 +1,7 @@
 import discord
-import series_manager
-import market_manager
+from managers import series_manager
+from managers import market_manager
+from managers import polymarket_manager
 from datetime import datetime
 
 # --- Level 0: Sport Category Selection ---
@@ -216,10 +217,41 @@ async def show_results(interaction, ticker, sport_name, market_type):
             if s_ticker and e_ticker:
                  market_url = f"https://kalshi.com/markets/{s_ticker}/{e_ticker}"
 
-            line_str = f"**{header}**\n**ID:** `{display_id}`\n**Yes:** {yes_p}¢ | **No:** {no_p}¢"
+            line_str = f"**{header}**"
             
+            # IDs Line
+            ids_line = f"**K_ID:** `{display_id}`"
+            
+            # Poly Match
+            # Use event title and Sport Name (e.g. "NFL") for matching
+            poly_data = await polymarket_manager.find_polymarket_match(g.get("event_title"), sport=sport_name)
+            
+            if poly_data:
+                if poly_data.get("yes_id"):
+                     ids_line += f"\n**Poly Yes ID:** `{poly_data['yes_id']}`"
+                if poly_data.get("no_id"):
+                     ids_line += f"\n**Poly No ID:** `{poly_data['no_id']}`"
+                
+            line_str += f"\n{ids_line}"
+            
+            # Odds Lines
+            line_str += f"\n**Kalshi:** Yes {yes_p}¢ | No {no_p}¢"
+            
+            if poly_data:
+                 p_yes = int(poly_data.get('yes', 0))
+                 p_no = int(poly_data.get('no', 0))
+                 line_str += f"\n**Poly:** Yes {p_yes}¢ | No {p_no}¢"
+
+            # Links
+            links_parts = []
             if market_url:
-                line_str += f"\n[View Market]({market_url})"
+                links_parts.append(f"[Kalshi]({market_url})")
+            
+            if poly_data and poly_data.get("url"):
+                links_parts.append(f"[Polymarket]({poly_data['url']})")
+                
+            if links_parts:
+                line_str += "\n" + " | ".join(links_parts)
 
             market_lines_str.append(line_str)
             

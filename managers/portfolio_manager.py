@@ -2,7 +2,7 @@ import aiohttp
 import os
 import asyncio
 from dotenv import load_dotenv
-from auth import sign_request
+from .auth import sign_request
 
 # Load environment variables
 load_dotenv()
