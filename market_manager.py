@@ -63,6 +63,8 @@ async def get_games_with_odds(series_ticker):
             game_data = {
                 "event_title": event_title,
                 "start_time": start_time,
+                "series_ticker": series_ticker,
+                "event_ticker": event_ticker,
                 "markets": {
                     "moneyline": [],
                     "spread": [],

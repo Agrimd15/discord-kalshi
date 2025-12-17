@@ -206,7 +206,21 @@ async def show_results(interaction, ticker, sport_name, market_type):
             # Spreads/Totals: Full Market ID (Specific Ticker)
             display_id = base_id if market_type == "moneyline" else raw_ticker
             
+            # Construct Market URL
+            # Format: https://kalshi.com/markets/{series_ticker}/{event_ticker}
+            # We need to access the game/event info from 'g'
+            s_ticker = g.get("series_ticker")
+            e_ticker = g.get("event_ticker")
+            
+            market_url = ""
+            if s_ticker and e_ticker:
+                 market_url = f"https://kalshi.com/markets/{s_ticker}/{e_ticker}"
+
             line_str = f"**{header}**\n**ID:** `{display_id}`\n**Yes:** {yes_p}¢ | **No:** {no_p}¢"
+            
+            if market_url:
+                line_str += f"\n[View Market]({market_url})"
+
             market_lines_str.append(line_str)
             
             

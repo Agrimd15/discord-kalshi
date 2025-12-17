@@ -4,8 +4,6 @@ from discord.ext import commands
 import aiohttp
 from dotenv import load_dotenv
 
-# test 
-
 # Modules
 from auth import sign_request
 import series_manager
@@ -70,7 +68,7 @@ async def on_ready():
         order_monitor.start()
 
 # --- Background Tasks ---
-@tasks.loop(seconds=60)
+@tasks.loop(seconds=5)
 async def order_monitor():
     """Checks for new fills and logs them to #order-logs."""
     channel = discord.utils.get(bot.get_all_channels(), name="order-logs")
@@ -105,10 +103,23 @@ async def order_monitor():
                 break
             new_fills.append(fill)
     else:
-        # First run? Maybe just log the very latest one to avoid spamming history?
-        # Or just log nothing and set state.
-        # User request implies they want logs. Let's log all fetched (limit 5) if first run.
-        new_fills = fills
+        # First run or no state file? 
+        # User wants ONLY new trades. So we should NOT log the history.
+        # We just set the state to the most recent fill (if any) and wait for next loop.
+        if fills:
+            # Fills are usually newest first. 
+            # We save the newest ID so we only catch things AFTER this.
+            latest_id = fills[0].get("trade_id")
+            
+            # Save State immediately
+            try:
+                with open(state_file, "w") as f:
+                    json.dump({"last_fill_trade_id": latest_id}, f)
+            except Exception as e:
+                print(f"Error writing state file: {e}")
+                
+        # Do not process these fills
+        return
 
     if not new_fills:
         return
@@ -146,7 +157,7 @@ async def order_monitor():
         market_info = await market_manager.get_market_info(ticker)
         
         market_title = "Unknown Market"
-        market_url = f"https://kalshi.com/markets/{ticker}" # Fallback
+        market_url = f"https://kalshi.com/events/{ticker}" # Fallback
         
         if market_info:
             market_title = market_info.get("title", market_title)
@@ -155,12 +166,24 @@ async def order_monitor():
                 market_title = f"{market_title} ({subtitle})"
                 
             # Construct URL: https://kalshi.com/markets/{series_ticker}/{event_ticker}
-            # Actually, web URL is often /markets/{series_ticker}/{event_ticker}
             # API returns 'series_ticker', 'event_ticker'.
             s_ticker = market_info.get("series_ticker")
             e_ticker = market_info.get("event_ticker")
+
+            # Fallback logic if series_ticker is missing but event_ticker exists (common in some endpoints)
+            if not s_ticker and e_ticker and "-" in e_ticker:
+                 # e.g. KXNBA-25DEC... -> Series is usually the prefix before the dash? 
+                 # Or just try to use the event ticker as the slug if that works?
+                 # Actually, Kalshi URLs often work with just /markets/{event_ticker} redirecting?
+                 # Safest is to try to extract series from event if possible, or just fail gracefully.
+                 # Let's try to extract from Ticker if needed.
+                 pass
+
             if s_ticker and e_ticker:
-                 market_url = f"https://kalshi.com/markets/{s_ticker}/{e_ticker}"
+                 market_url = f"https://kalshi.com/events/{s_ticker}/{e_ticker}"
+            elif e_ticker:
+                 # Try using just event ticker, often redirects or works
+                 market_url = f"https://kalshi.com/events/{e_ticker}"
 
         # 2. Market Type
         market_type = "Moneyline"
@@ -210,9 +233,15 @@ async def order_monitor():
         # Row 3: Account Status
         embed.add_field(name="Updated Balance", value=f"**{current_balance_str}**", inline=False)
         
-        embed.add_field(name="Links", value=f"[View Market]({market_url})", inline=False)
+        # embed.add_field(name="Links", value=f"[View Market]({market_url})", inline=False) # Removed as per request (Button exists)
         
-        await channel.send(embed=embed)
+        # Button View
+        view = None
+        if market_url:
+            view = discord.ui.View()
+            view.add_item(discord.ui.Button(label="View Market", style=discord.ButtonStyle.link, url=market_url))
+
+        await channel.send(embed=embed, view=view)
         
         # Update Loop Variable to track latest
         last_fill_trade_id = fill.get("trade_id")
