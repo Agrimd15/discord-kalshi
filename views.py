@@ -56,9 +56,9 @@ class MarketTypeView(discord.ui.View):
         
         # Check available types to enable/disable buttons?
         # Or just show all standard ones.
-        self.add_item(MarketTypeButton("Moneyline", "moneyline", "🏆"))
-        self.add_item(MarketTypeButton("Spreads", "spread", "📊"))
-        self.add_item(MarketTypeButton("Totals", "total", "🔢"))
+        self.add_item(MarketTypeButton("Moneyline", "moneyline", None))
+        self.add_item(MarketTypeButton("Spreads", "spread", None))
+        self.add_item(MarketTypeButton("Totals", "total", None))
 
 class MarketTypeButton(discord.ui.Button):
     def __init__(self, label, market_type, emoji):
@@ -123,7 +123,7 @@ async def show_results(interaction, ticker, sport_name, market_type):
                 game_date = datetime.strptime(dt_str, "%y%b%d")
                 
                 # Format for display: Dec 15
-                date_str_display = f"📅 {mmm.title()} {dd}"
+                date_str_display = f"{mmm.title()} {dd}"
             except ValueError:
                 pass
         

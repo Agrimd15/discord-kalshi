@@ -125,10 +125,35 @@ async def get_games_with_odds(series_ticker):
             
     return results
 
-if __name__ == "__main__":
-    # Test with NFL if available, or NBA
-    # Assuming KXNBAGAME is in our allow list
-    TEST_TICKER = "KXNBAGAME" 
-    print(f"Fetching data for {TEST_TICKER}...")
-    result = asyncio.run(get_games_with_odds(TEST_TICKER))
     print(json.dumps(result, indent=4))
+
+async def get_market_info(market_ticker):
+    """
+    Fetches details for a single market to get Series/Event tickers (for URL) and Title.
+    """
+    endpoint = f"/markets/{market_ticker}"
+    sign_path = f"/trade-api/v2{endpoint}"
+    url = f"{BASE_URL}{endpoint}"
+
+    if not KALSHI_KEY_ID:
+        return None
+
+    try:
+        headers = sign_request("GET", sign_path, KALSHI_KEY_ID, KALSHI_PRIVATE_KEY_PATH)
+    except Exception as e:
+        print(f"Error signing request: {e}")
+        return None
+
+    async with aiohttp.ClientSession() as session:
+        try:
+            async with session.get(url, headers=headers) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    # Response: { "market": { ... } }
+                    return data.get("market")
+                else:
+                    # e.g. 404 if ticker invalid
+                    return None
+        except Exception as e:
+            print(f"Exception fetching market info: {e}")
+            return None
