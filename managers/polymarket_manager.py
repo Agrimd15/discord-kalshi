@@ -141,6 +141,7 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         sport_map = {
             "NFL": 450,
             "NBA": 745,
+            "NHL": 899,
             "MLB": 2217, # Heuristic
             "Football": 10, # Generic generic
             "Basketball": 28
@@ -178,6 +179,23 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         "san antonio": "spurs", "toronto": "raptors", "utah": "jazz",
         "washington": "wizards"
     }
+    
+    # NHL Team Mapping
+    nhl_map = {
+        "anaheim": "ducks", "boston": "bruins", "buffalo": "sabres",
+        "calgary": "flames", "carolina": "hurricanes", "chicago": "blackhawks",
+        "colorado": "avalanche", "columbus": "blue jackets", "dallas": "stars",
+        "detroit": "red wings", "edmonton": "oilers", "florida": "panthers",
+        "los angeles": "kings", "minnesota": "wild", "montreal": "canadiens",
+        "nashville": "predators", "new jersey": "devils", 
+        "new york i": "islanders", "nyi": "islanders",
+        "new york r": "rangers", "nyr": "rangers",
+        "ottawa": "senators", "philadelphia": "flyers", "pittsburgh": "penguins",
+        "san jose": "sharks", "seattle": "kraken", "st. louis": "blues",
+        "tampa bay": "lightning", "toronto": "maple leafs", "utah": "hockey club",
+        "vancouver": "canucks", "vegas": "golden knights", "las vegas": "golden knights",
+        "washington": "capitals", "winnipeg": "jets"
+    }
 
     # 1. Extract Teams
     # Kalshi: "Team A vs Team B" or "Team A at Team B"
@@ -204,6 +222,10 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
     if sport == "NBA":
         team_a = nba_map.get(team_a, team_a)
         team_b = nba_map.get(team_b, team_b)
+        
+    if sport == "NHL":
+        team_a = nhl_map.get(team_a, team_a)
+        team_b = nhl_map.get(team_b, team_b)
             
     # Validated: If team name was translated, using it for search is usually better.
     # e.g. "Kings" works better than "Sacramento".
@@ -269,7 +291,7 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         
     # Use mapped title for matching if we translated it
     match_title = kalshi_title
-    if (sport == "NFL" or sport == "NBA") and team_a and team_b:
+    if (sport == "NFL" or sport == "NBA" or sport == "NHL") and team_a and team_b:
         # Construct "Rams vs Seahawks" or "Kings vs Trail Blazers" to match Poly format
         # Poly format often "Home vs Away" or "Away @ Home" or just "vs".
         match_title = f"{team_a.title()} vs {team_b.title()}"
