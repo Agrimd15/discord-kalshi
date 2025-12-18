@@ -72,14 +72,6 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to load cogs: {e}")
 
-    # Start loop
-    if not order_monitor.is_running():
-        order_monitor.start()
-
-# --- Bot Events ---
-@bot.event
-async def on_ready():
-    print(f"Logged in as {bot.user}")
     print("Kalshi Bot Ready: Phase 3 (Interactive Search).")
     
     # Start the order monitor loop if not already running

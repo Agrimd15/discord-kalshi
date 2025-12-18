@@ -2,4 +2,4 @@ discord.py
 python-dotenv
 aiohttp
 cryptography
-websocketspy-clob-client
+py_clob_client==0.28.0

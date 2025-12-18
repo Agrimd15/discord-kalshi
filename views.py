@@ -3,6 +3,7 @@ from managers import series_manager
 from managers import market_manager
 from managers import polymarket_manager
 from datetime import datetime
+import asyncio
 
 # --- Level 0: Sport Category Selection ---
 class SportsCategoryView(discord.ui.View):
@@ -148,6 +149,33 @@ async def show_results(interaction, ticker, sport_name, market_type):
     if not processed_games:
         await interaction.edit_original_response(content=f"No active **{market_type}** markets found in the next 48h for {sport_name}.", view=None)
         return
+
+    # --- Concurrent Polymarket Fetching Validation ---
+    
+    # helper for concurrent execution with semaphore
+    sem = asyncio.Semaphore(5) # Limit to 5 concurrent requests
+    
+    async def fetch_poly_data(item):
+        g = item["game"]
+        title = g.get("event_title")
+        async with sem:
+            # We add a small random sleep or just proceed? Semaphore is handled by async with.
+            p_data = await polymarket_manager.find_polymarket_match(title, sport=sport_name)
+            return p_data
+
+    # Gather all tasks
+    tasks = [fetch_poly_data(item) for item in processed_games[:5]] # Limit total items processed to 5 for now? Or process all filtered?
+    # Actually, let's process up to 5 games max as we only show up to 4-5 anyway.
+    # The previous loop broke at count >= 4.
+    
+    # Let's cap processed games to 5 to avoid fetching data for games we won't show.
+    games_to_display = processed_games[:5]
+    
+    poly_results = await asyncio.gather(*tasks)
+    
+    # Store results back in items
+    for i, p_data in enumerate(poly_results):
+        games_to_display[i]["poly_data"] = p_data
         
     embed = discord.Embed(
         title=f"{sport_name} - {market_type.title()} (Next 48h)",
@@ -162,7 +190,8 @@ async def show_results(interaction, ticker, sport_name, market_type):
         markets = item["markets"]
         date_str = item["date_display"]
         title = g.get("event_title")
-
+        poly_data = item.get("poly_data") # Pre-fetched
+        
         # Deduplicate Markets for Display
         # Group by Base ID only for Moneyline to avoid redundancy (showing both Team A and Team B sides)
         # For Spreads/Totals, multiple markets exist (different lines), so we show them all (capped).
@@ -175,6 +204,7 @@ async def show_results(interaction, ticker, sport_name, market_type):
         # For now, API order is usually fine.
         
         limit_per_game = 5 if market_type != "moneyline" else 2
+        current_field_length = 0
         
         for m in markets[:limit_per_game]: # Safety cap to avoid Embed Field limit (1024 chars)
             raw_ticker = m.get("ticker", "")
@@ -222,9 +252,8 @@ async def show_results(interaction, ticker, sport_name, market_type):
             # IDs Line
             ids_line = f"**K_ID:** `{display_id}`"
             
-            # Poly Match
-            # Use event title and Sport Name (e.g. "NFL") for matching
-            poly_data = await polymarket_manager.find_polymarket_match(g.get("event_title"), sport=sport_name)
+            # Poly Match (ALREADY FETCHED)
+            # poly_data = await polymarket_manager.find_polymarket_match(...) -> REMOVED
             
             if poly_data:
                 if poly_data.get("yes_id"):
@@ -235,12 +264,26 @@ async def show_results(interaction, ticker, sport_name, market_type):
             line_str += f"\n{ids_line}"
             
             # Odds Lines
-            line_str += f"\n**Kalshi:** Yes {yes_p}¢ | No {no_p}¢"
+            # Kalshi Side
+            k_side = "Yes"
+            if "-" in raw_ticker:
+                 k_suffix = raw_ticker.split("-")[-1]
+                 # If suffix is 2-3 chars, use it.
+                 if len(k_suffix) <= 5: # e.g. POR, SAC, 49ERS
+                     k_side = k_suffix
+            
+            line_str += f"\n**Kalshi ({k_side}):** Yes {yes_p}¢ | No {no_p}¢"
             
             if poly_data:
                  p_yes = int(poly_data.get('yes', 0))
                  p_no = int(poly_data.get('no', 0))
-                 line_str += f"\n**Poly:** Yes {p_yes}¢ | No {p_no}¢"
+                 
+                 # Poly Outcomes
+                 # outcome[0] corresponds to 'Yes' token
+                 outcomes = poly_data.get("outcomes", ["Yes", "No"])
+                 p_side = outcomes[0]
+                 
+                 line_str += f"\n**Poly ({p_side}):** Yes {p_yes}¢ | No {p_no}¢"
 
             # Links
             links_parts = []
@@ -252,7 +295,15 @@ async def show_results(interaction, ticker, sport_name, market_type):
                 
             if links_parts:
                 line_str += "\n" + " | ".join(links_parts)
-
+            
+            # Character Limit Check
+            # Discord Limit: 1024. Safe Limit: ~1000.
+            new_len = len(line_str) + 2 # +2 for newline join
+            if current_field_length + new_len > 950:
+                 market_lines_str.append(f"... (Truncated {len(markets) - len(market_lines_str)} more)")
+                 break
+            
+            current_field_length += new_len
             market_lines_str.append(line_str)
             
             

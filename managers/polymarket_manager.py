@@ -84,19 +84,18 @@ async def search_events(query, tag_id=None):
     async with aiohttp.ClientSession() as session:
         try:
             # API seems to ignore 'q', so we fetch more and filter locally.
-            # Using limit 500 to catch active sports games from popular feed.
+            # Using limit 1000 to catch active sports games from popular feed.
             # If tag_id is provided, filter by it on server side!
             req_params = {
-                "limit": 500,
+                "limit": 1000,
                 "active": "true",
                 "closed": "false",
                 "q": query 
             }
             if tag_id:
                 req_params["tag_id"] = tag_id
-                # Reduce limit if scoped to tag? Or keep high to be safe.
-                # Tag search is much more specific.
-                req_params["limit"] = 100
+                # Keep limit high (1000) even with tag, as categories like NFL have many events (props).
+                # req_params["limit"] = 100
             async with session.get(GAMMA_URL, params=req_params) as resp:
                 if resp.status == 200:
                     data = await resp.json()
@@ -164,6 +163,22 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         "tennessee": "titans", "washington": "commanders"
     }
 
+    # NBA Team Mapping
+    nba_map = {
+        "atlanta": "hawks", "boston": "celtics", "brooklyn": "nets",
+        "charlotte": "hornets", "chicago": "bulls", "cleveland": "cavaliers",
+        "dallas": "mavericks", "denver": "nuggets", "detroit": "pistons",
+        "golden state": "warriors", "houston": "rockets", "indiana": "pacers",
+        "los angeles c": "clippers", "lac": "clippers",
+        "los angeles l": "lakers", "lal": "lakers",
+        "memphis": "grizzlies", "miami": "heat", "milwaukee": "bucks",
+        "minnesota": "timberwolves", "new orleans": "pelicans", "new york": "knicks",
+        "oklahoma city": "thunder", "orlando": "magic", "philadelphia": "76ers",
+        "phoenix": "suns", "portland": "trail blazers", "sacramento": "kings",
+        "san antonio": "spurs", "toronto": "raptors", "utah": "jazz",
+        "washington": "wizards"
+    }
+
     # 1. Extract Teams
     # Kalshi: "Team A vs Team B" or "Team A at Team B"
     s_title = kalshi_title.lower().strip()
@@ -182,10 +197,16 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         # Fallback
         team_a = s_title
 
-    # Translate if NFL
     if sport == "NFL":
         team_a = nfl_map.get(team_a, team_a)
         team_b = nfl_map.get(team_b, team_b)
+
+    if sport == "NBA":
+        team_a = nba_map.get(team_a, team_a)
+        team_b = nba_map.get(team_b, team_b)
+            
+    # Validated: If team name was translated, using it for search is usually better.
+    # e.g. "Kings" works better than "Sacramento".
             
     # Helper to search and filter
     async def try_search(q):
@@ -193,15 +214,29 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         # Heuristic: If name ends with space + valid letter, strip it?
         # Actually, let's just search raw first, if 0, try stripping.
         
+        # Try searching with Tag first (more specific)
         cands = await search_events(q, tag_id=tag_id)
-        if cands: return cands
+        if cands: 
+            return cands
+            
+        # If no results with Tag, try Global search (Fallback)
+        # Sometimes events are tagged incorrectly or API fails with tag filter
+        if tag_id:
+            cands = await search_events(q, tag_id=None)
+            if cands: 
+                return cands
         
         # Strip suffix " R", " C" etc from Kalshi names?
         # Only if length > 2
         if len(q.split()) > 1 and len(q.split()[-1]) == 1:
              q_stripped = " ".join(q.split()[:-1])
+             # Try stripped with tag
              cands = await search_events(q_stripped, tag_id=tag_id)
              if cands: return cands
+             # Try stripped global
+             if tag_id:
+                 cands = await search_events(q_stripped, tag_id=None)
+                 if cands: return cands
              
         return []
 
@@ -255,28 +290,60 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         # For simple mapping, let's take the market with highest volume? Or just the first one.
         # Let's take the first one for now.
         
-        m = markets[0]
-        # Odds are in "outcomePrices" (json string) or "bestBid"/"bestAsk"?
-        # Gamma structure: m["outcomePrices"] is ["0.5", "0.5"] usually.
-        # Or m["clobTokenIds"]...
-        # We need the current price. Gamma "markets" object usually has "outcomePrices" array?
-        # Actually Gamma usually returns "group" info. 
-        # Let's assume we can get prices.
-        # If outcomePrices is present:
+        m = None
+        
+        # Smart selection of the "Moneyline" / "Winner" market
+        # 1. Try Exact Title Match first
+        for market in markets:
+            if market.get("question") == match.get("title"):
+                m = market
+                break
+                
+        # 2. If no exact match, try filtering out props/spreads
+        if not m:
+            candidates = []
+            exclusion_keywords = ["Spread", "Total", "Over", "Under", "Handicap", "Touchdown", "Yards", "Field Goal", "1H", "2H", "Quarter"]
+            
+            for market in markets:
+                q_text = market.get("question", "")
+                is_excluded = any(k in q_text for k in exclusion_keywords)
+                if not is_excluded:
+                    candidates.append(market)
+            
+            # Pick the shortest question candidate (usually the cleanest "Team A vs Team B")
+            if candidates:
+                candidates.sort(key=lambda x: len(x.get("question", "")))
+                m = candidates[0]
+                
+        # 3. Fallback
+        if not m:
+             m = markets[0]
+             
+        # Use Best Bid/Ask if available for more real-time accuracy, fallback to outcomePrices
+        # Check if we have bestBid/bestAsk in the market object (from Gamma)
+        
         prices = m.get("outcomePrices") # e.g. '["0.52", "0.48"]' (It's a JSON string!)
         import json
         
         yes_price = 0
         no_price = 0
         
-        try:
-            if prices:
+        if m.get("bestAsk") is not None:
+             try:
+                 yes_price = float(m.get("bestAsk")) * 100
+                 # Approx No price = 100 - Yes
+                 no_price = 100 - yes_price
+             except:
+                 pass
+
+        if yes_price == 0 and prices:
+            try:
                 p_list = json.loads(prices)
                 if len(p_list) >= 2:
                     yes_price = float(p_list[0]) * 100 # Convert to cents
                     no_price = float(p_list[1]) * 100
-        except:
-             pass
+            except:
+                 pass
              
         # Get Token IDs (Long Integers)
         # Gamma API returns this as a JSON string '["id1", "id2"]' sometimes, or a list.
@@ -294,6 +361,18 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         t_yes_id = token_ids[0] if len(token_ids) > 0 else None
         t_no_id = token_ids[1] if len(token_ids) > 1 else None
         
+        # Get Outcome Names
+        outcomes = m.get("outcomes") 
+        # Usually ["TeamA", "TeamB"] or ["Yes", "No"]
+        # If not present, default to ["Yes", "No"]
+        if not outcomes:
+            outcomes = ["Yes", "No"]
+        elif isinstance(outcomes, str):
+            try:
+                outcomes = json.loads(outcomes)
+            except:
+                outcomes = ["Yes", "No"]
+        
         return {
             "title": match["title"],
             "id": m.get("id"), # Short Integer ID
@@ -302,6 +381,7 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
             "no_id": t_no_id,
             "yes": yes_price,
             "no": no_price,
+            "outcomes": outcomes,
             "url": f"https://polymarket.com/event/{match['slug']}"
         }
         
