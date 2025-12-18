@@ -207,7 +207,7 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
             
     # Validated: If team name was translated, using it for search is usually better.
     # e.g. "Kings" works better than "Sacramento".
-            
+
     # Helper to search and filter
     async def try_search(q):
         # Remove single letter suffixes usually found in Kalshi (e.g. "Los Angeles R")
@@ -269,10 +269,9 @@ async def find_polymarket_match(kalshi_title, sport=None, date_str=None):
         
     # Use mapped title for matching if we translated it
     match_title = kalshi_title
-    if sport == "NFL" and team_a and team_b:
-        # Construct "Rams vs Seahawks" to match Poly format
+    if (sport == "NFL" or sport == "NBA") and team_a and team_b:
+        # Construct "Rams vs Seahawks" or "Kings vs Trail Blazers" to match Poly format
         # Poly format often "Home vs Away" or "Away @ Home" or just "vs".
-        # We can try "Team A vs Team B"
         match_title = f"{team_a.title()} vs {team_b.title()}"
     
     match, score = find_best_match(match_title, cand_list, threshold=0.4) # Lower threshold slightly
