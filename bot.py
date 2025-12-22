@@ -72,7 +72,7 @@ async def on_ready():
     except Exception as e:
         print(f"Failed to load cogs: {e}")
 
-    print("Kalshi Bot Ready: Phase 3 (Interactive Search).")
+    print("Kalshi Bot Ready: !bal, !pos, !search.")
     
     # Start the order monitor loop if not already running
     if not order_monitor.is_running():
@@ -357,19 +357,62 @@ async def positions(ctx):
         await ctx.send(f"Error: {error}")
         return
     
-    positions = [p for p in data.get("positions", []) if p.get("position", 0) > 0]
+    positions = [p for p in data.get("market_positions", []) if p.get("position", 0) > 0]
     
     if not positions:
         await ctx.send("You have no active positions.")
         return
         
     embed = discord.Embed(title="Your Active Positions", color=discord.Color.blue())
+    
+    # Process positions (limit to 10 for now to avoid rate limits/timeouts on title fetches)
     for p in positions[:10]:
         t = p.get('ticker')
         c = p.get('position')
         exp = p.get('market_exposure', 0)
-        avg = (exp / c) if c else 0
-        embed.add_field(name=t, value=f"{c}x @ {avg:.1f}¢", inline=False)
+        
+        # Calculate Average Price in Dollars
+        # Exposure is in cents usually? Let's check. 
+        # API says market_exposure is in cents.
+        # Average Price (Cents) = Exposure / Count
+        avg_cents = (exp / c) if c else 0
+        avg_dollars = avg_cents / 100.0
+        
+        # Fetch Market Title
+        market_info = await market_manager.get_market_info(t)
+        event_name = market_info.get("title") if market_info else t
+        subtitle = market_info.get("subtitle", "") if market_info else ""
+        
+        # Determine Side (Default to Yes for Long positions)
+        side = "Yes" 
+        
+        # Extract Team/Line from Ticker Suffix
+        # Ticker e.g. KXNFLGAME-25DEC21ATLARI-ATL -> ATL
+        line_name = subtitle
+        if "-" in t:
+             suffix = t.split("-")[-1]
+             # If suffix is short (likely a team abbr), use it.
+             if len(suffix) <= 4: 
+                 line_name = suffix
+        
+        if not line_name:
+            line_name = "Unknown"
+
+        # Format:
+        # Event Name (Field Name)
+        # Line: ATL - Yes
+        # ID: ...
+        # Price: ...
+        # Platform: ...
+        
+        val_str = (
+            f"**Line:** {line_name} - {side}\n"
+            f"**ID:** `{t}`\n"
+            f"**Price:** {c}x ${avg_dollars:.2f}\n"
+            f"**Platform:** Kalshi"
+        )
+        
+        embed.add_field(name=event_name, value=val_str, inline=False)
         
     await ctx.send(embed=embed)
 
